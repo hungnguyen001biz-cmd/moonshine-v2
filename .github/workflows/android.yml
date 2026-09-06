@@ -6,13 +6,35 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source with Git LFS
         uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Ensure Git LFS files are downloaded
+        run: |
+          git lfs install
+          git lfs pull
+          git lfs checkout
+
+          if grep -q "git-lfs.github.com/spec" core/speaker-embedding-model-data.cpp; then
+            echo "ERROR: speaker-embedding-model-data.cpp is still an LFS pointer"
+            exit 1
+          fi
+
+          echo "Git LFS files downloaded successfully"
+          wc -c core/speaker-embedding-model-data.cpp
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -31,10 +53,10 @@ jobs:
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
 
-      - name: Publish Moonshine library to Maven Local
-        run: ./gradlew publishToMavenLocal --stacktrace
+      - name: Publish Moonshine Android library locally
+        run: ./gradlew publishToMavenLocal --no-daemon --stacktrace
 
-      - name: Add Maven Local to Transcriber
+      - name: Enable Maven Local for Transcriber
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -42,30 +64,44 @@ jobs:
           path = Path("examples/android/Transcriber/settings.gradle.kts")
           text = path.read_text()
 
-          old = """repositories {
+          marker = """repositories {
                   google()
                   mavenCentral()
               }"""
 
-          new = """repositories {
+          replacement = """repositories {
                   mavenLocal()
                   google()
                   mavenCentral()
               }"""
 
-          if old not in text:
-              raise SystemExit("Không tìm thấy repositories block cần sửa")
+          if "mavenLocal()" not in text:
+              if marker not in text:
+                  raise SystemExit(
+                      "Không tìm thấy dependency repositories block"
+                  )
+              text = text.replace(marker, replacement, 1)
+              path.write_text(text)
 
-          path.write_text(text.replace(old, new, 1))
+          print(path.read_text())
           PY
 
-      - name: Build Transcriber APK
+      - name: Build Transcriber debug APK
         working-directory: examples/android/Transcriber
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew clean assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK
+        run: |
+          find examples/android/Transcriber/app/build/outputs/apk \
+            -type f -name "*.apk" -print
+
+          test -n "$(find examples/android/Transcriber/app/build/outputs/apk \
+            -type f -name '*.apk' -print -quit)"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: moonshine-transcriber-apk
-          path: examples/android/Transcriber/app/build/outputs/apk/debug/*.apk
+          path: examples/android/Transcriber/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
+          retention-days: 7
