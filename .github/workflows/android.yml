@@ -29,7 +29,7 @@ jobs:
           git lfs checkout
 
           if grep -q "git-lfs.github.com/spec" core/speaker-embedding-model-data.cpp; then
-            echo "ERROR: speaker-embedding-model-data.cpp is still an LFS pointer"
+            echo "ERROR: Git LFS file was not downloaded"
             exit 1
           fi
 
@@ -54,7 +54,19 @@ jobs:
           echo "android.enableJetifier=true" >> gradle.properties
 
       - name: Publish Moonshine Android library locally
-        run: ./gradlew publishToMavenLocal --no-daemon --stacktrace
+        run: |
+          ./gradlew publishToMavenLocal \
+            -x signMavenPublication \
+            --no-daemon \
+            --stacktrace
+
+      - name: Verify local Moonshine artifact
+        run: |
+          find "$HOME/.m2/repository/ai/moonshine/moonshine-voice" \
+            -type f -maxdepth 3 -print
+
+          test -f \
+            "$HOME/.m2/repository/ai/moonshine/moonshine-voice/0.0.45/moonshine-voice-0.0.45.aar"
 
       - name: Enable Maven Local for Transcriber
         run: |
@@ -64,23 +76,21 @@ jobs:
           path = Path("examples/android/Transcriber/settings.gradle.kts")
           text = path.read_text()
 
-          marker = """repositories {
+          old = """repositories {
                   google()
                   mavenCentral()
               }"""
 
-          replacement = """repositories {
+          new = """repositories {
                   mavenLocal()
                   google()
                   mavenCentral()
               }"""
 
           if "mavenLocal()" not in text:
-              if marker not in text:
-                  raise SystemExit(
-                      "Không tìm thấy dependency repositories block"
-                  )
-              text = text.replace(marker, replacement, 1)
+              if old not in text:
+                  raise SystemExit("Không tìm thấy repositories block")
+              text = text.replace(old, new, 1)
               path.write_text(text)
 
           print(path.read_text())
@@ -88,7 +98,10 @@ jobs:
 
       - name: Build Transcriber debug APK
         working-directory: examples/android/Transcriber
-        run: ./gradlew clean assembleDebug --no-daemon --stacktrace
+        run: |
+          ./gradlew clean assembleDebug \
+            --no-daemon \
+            --stacktrace
 
       - name: Verify APK
         run: |
