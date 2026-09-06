@@ -26,14 +26,13 @@ jobs:
           chmod +x gradlew
           chmod +x examples/android/Transcriber/gradlew
 
-      - name: Inspect Gradle projects
+      - name: Enable AndroidX
         run: |
-          ./gradlew projects
-          ./gradlew tasks --all
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
 
       - name: Publish Moonshine library to Maven Local
-        run: |
-          ./gradlew publishToMavenLocal
+        run: ./gradlew publishToMavenLocal --stacktrace
 
       - name: Add Maven Local to Transcriber
         run: |
